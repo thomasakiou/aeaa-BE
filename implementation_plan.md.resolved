@@ -1,0 +1,36 @@
+# Implementation Plan: AEAA Conference Portal Backend
+
+The objective is to build a REST API in Python using FastAPI, backed by PostgreSQL, handling JWT authentication, file uploads, and SMTP emails.
+
+## Proposed Changes
+
+### Core Setup & Configuration
+- Create `requirements.txt` to include `fastapi`, `uvicorn`, `sqlalchemy`, `psycopg2`, `python-jose`, `passlib`, `pydantic-settings`, `python-multipart`, and `alembic` (for migrations).
+- Create `app/main.py` to initialize the FastAPI app, configure CORS, and map routes under `/api`.
+- Create `app/core/config.py` for centralizing environment variables (DB URL, JWT Secret, SMTP config).
+
+### Database and Models
+- Create `app/database.py` to set up SQLAlchemy engine and sessionmaker.
+- Create `app/models.py` to define SQLAlchemy models `User`, `PaperSubmission`, and `ContactMessage`.
+- Create `app/schemas.py` to define all Pydantic request and response schemas (e.g., `UserCreate`, `UserResponse`, `SubmissionCreate`).
+
+### Security and Authentication
+- Create `app/core/security.py` for password hashing (`bcrypt`) and JWT token creation/verification.
+- Create `app/api/deps.py` for FastAPI dependencies (e.g., `get_db`, `get_current_user`, `get_current_admin`).
+
+### API Routes
+- Create `app/routers/auth.py` for `/api/auth/register` and `/api/auth/login`.
+- Create `app/routers/user.py` for `/api/user/profile` (GET, PUT) and user submissions.
+- Create `app/routers/admin.py` for admin endpoints (User management, all submissions, system stats).
+- Create `app/routers/contact.py` for submitting contact form messages.
+
+### Services
+- Create `app/services/email.py` with a simple SMTP mailer using `smtplib` and `email.mime`.
+- Create `app/services/storage.py` to handle saving uploaded PDF files to the local disk.
+
+## Verification Plan
+### Manual Verification
+- Start up the FastAPI app using `uvicorn`.
+- Seed a local/remote PostgreSQL database (aeaa_db which is already created)  and verify all tables are created.
+- Request the user to provide PostgreSQL credentials (or confirm using SQLite in dev) and SMTP credentials to fully test.
+- Use tools like `curl` or Swagger UI (`/docs`) to verify registration, login, profile access, and paper submission.

@@ -1,0 +1,516 @@
+# Backend Requirements — 43rd AEAA Conference Portal
+
+> **Document version:** 1.0 — 30 September 2026
+> **Audience:** Backend developer(s)
+> **Frontend repo:** `aeaa_FE`
+
+---
+
+## 1. Architecture Overview
+
+```mermaid
+graph LR
+    FE["React Frontend"] -- REST/JSON --> API["Backend API Server"]
+    API -- SMTP --> MAIL["Email Service (aeaa2027@neco.gov.ng)"]
+    API -- ORM --> DB[(Database)]
+    API -- Disk / S3 --> FS["File Storage"]
+```
+
+| Concern | Recommendation |
+|---|---|
+| **Runtime** | Python (FastAPI) |
+| **Database** | PostgreSQL | dtabase name is aeaa_db
+| **Auth** | JWT (access + refresh tokens) |
+| **Email** | Nodemailer / Django `send_mail` via institutional SMTP or a transactional service (e.g., Mailgun, SendGrid) |
+| **File Storage** | Local disk for MVP; migrate to S3-compatible bucket for production |
+| **Hosting** | The API should expose a `/api` prefix. The frontend will call these endpoints. CORS must allow the frontend origin. |
+
+---
+
+## 2. Data Models
+
+### 2.1 [User](file:///g:/Projects/aeaa_FE/src/context/AuthContext.tsx#5-15)
+
+| Field | Type | Constraints | Notes |
+|---|---|---|---|
+| [id](file:///g:/Projects/aeaa_FE/src/context/AuthContext.tsx#44-84) | UUID | PK, auto | — |
+| `fullName` | VARCHAR(255) | NOT NULL | From Registration form |
+| `email` | VARCHAR(255) | NOT NULL, UNIQUE | Used for login |
+| `password` | VARCHAR(255) | NOT NULL | Hashed (bcrypt / argon2) |
+| `organization` | VARCHAR(255) | — | "Organisation / Institution" field |
+| `country` | VARCHAR(100) | — | — |
+| `phoneNumber` | VARCHAR(30) | — | — |
+| `role` | ENUM('USER','ADMIN') | DEFAULT 'USER' | — |
+| `registrationPackage` | VARCHAR(100) | — | `"Registration Fee Only ($650)"` or `"Registration + Excursion ($750)"` |
+| `paymentStatus` | ENUM('PENDING','COMPLETED') | DEFAULT 'PENDING' | Admin toggles this |
+| `createdAt` | TIMESTAMP | auto | — |
+| `updatedAt` | TIMESTAMP | auto | — |
+
+### 2.2 `PaperSubmission`
+
+| Field | Type | Constraints | Notes |
+|---|---|---|---|
+| [id](file:///g:/Projects/aeaa_FE/src/context/AuthContext.tsx#44-84) | UUID | PK, auto | — |
+| `userId` | UUID | FK → User.id, NOT NULL | The submitting user |
+| `title` | VARCHAR(500) | NOT NULL | Paper title (entered in upload modal) |
+| `subTheme` | VARCHAR(255) | — | One of the 6 conference sub-themes |
+| `filePath` | VARCHAR(500) | NOT NULL | Server path / S3 key of the uploaded PDF |
+| `originalFileName` | VARCHAR(255) | NOT NULL | Original file name for display |
+| `fileSizeMB` | DECIMAL(6,2) | — | For convenience |
+| `status` | ENUM('SUBMITTED','UNDER_REVIEW','ACCEPTED','REJECTED') | DEFAULT 'SUBMITTED' | — |
+| `createdAt` | TIMESTAMP | auto | — |
+
+### 2.3 `ContactMessage`
+
+| Field | Type | Constraints | Notes |
+|---|---|---|---|
+| [id](file:///g:/Projects/aeaa_FE/src/context/AuthContext.tsx#44-84) | UUID | PK, auto | — |
+| `senderName` | VARCHAR(255) | NOT NULL | "Your Name" field |
+| `senderEmail` | VARCHAR(255) | NOT NULL | "Email Address" field |
+| `subject` | VARCHAR(255) | NOT NULL | "Subject" field |
+| `message` | TEXT | NOT NULL | "Message" textarea |
+| `sentAt` | TIMESTAMP | auto | — |
+
+---
+
+## 3. API Endpoints
+
+> All endpoints are prefixed with `/api`. All request/response bodies are JSON unless noted.
+
+### 3.1 Authentication
+
+#### `POST /api/auth/register`
+
+Creates a new user account. This maps to the **Registration Form** on the `/registration` page.
+
+**Request body:**
+
+```json
+{
+  "fullName": "John Doe",
+  "email": "john@example.com",
+  "organization": "NECO",
+  "country": "Nigeria",
+  "phoneNumber": "+2348035063496",
+  "registrationPackage": "Registration + Excursion ($750)",
+  "password": "securePassword123",
+  "confirmPassword": "securePassword123"
+}
+```
+
+**Validation rules:**
+- `email` must be valid and unique
+- `password` minimum 8 characters
+- `password` must match `confirmPassword`
+- `fullName`, `email`, `password` are required; others optional
+
+**Success response — `201 Created`:**
+
+```json
+{
+  "user": { "id": "...", "fullName": "...", "email": "...", "role": "USER", ... },
+  "token": "eyJhbGci..."
+}
+```
+
+**Error response — `409 Conflict`:** if email already exists.
+
+---
+
+#### `POST /api/auth/login`
+
+Authenticates a user. This maps to the **Login Form** on the `/login` page.
+
+**Request body:**
+
+```json
+{
+  "email": "john@example.com",
+  "password": "securePassword123"
+}
+```
+
+**Success response — `200 OK`:**
+
+```json
+{
+  "user": {
+    "id": "uuid",
+    "fullName": "John Doe",
+    "email": "john@example.com",
+    "role": "USER",
+    "organization": "NECO",
+    "country": "Nigeria",
+    "phoneNumber": "+234...",
+    "paymentStatus": "PENDING",
+    "registrationPackage": "Registration + Excursion ($750)"
+  },
+  "token": "eyJhbGci..."
+}
+```
+
+> The frontend stores the token in `localStorage` and sends it as `Authorization: Bearer <token>` on subsequent requests.
+
+**Error response — `401 Unauthorized`:** invalid credentials.
+
+---
+
+#### `POST /api/auth/logout`
+
+Optional. Invalidates a refresh token if implemented. The frontend currently clears `localStorage` on logout, so this endpoint is optional.
+
+---
+
+### 3.2 User Routes (Authenticated, Role: `USER` or `ADMIN`)
+
+All routes below require `Authorization: Bearer <token>` header.
+
+#### `GET /api/user/profile`
+
+Returns the currently authenticated user's profile data. Displayed on the **User Dashboard** (`/dashboard`).
+
+**Response — `200 OK`:**
+
+```json
+{
+  "id": "uuid",
+  "fullName": "John Doe",
+  "email": "john@example.com",
+  "organization": "NECO",
+  "country": "Nigeria",
+  "phoneNumber": "+234...",
+  "role": "USER",
+  "paymentStatus": "PENDING",
+  "registrationPackage": "Registration + Excursion ($750)",
+  "createdAt": "2026-09-28T12:00:00Z"
+}
+```
+
+---
+
+#### `PUT /api/user/profile`
+
+Updates the authenticated user's profile fields.
+
+**Request body (partial update):**
+
+```json
+{
+  "fullName": "John Doe Updated",
+  "organization": "New Org",
+  "country": "Ghana",
+  "phoneNumber": "+233..."
+}
+```
+
+**Response — `200 OK`:** Returns the updated user object.
+
+---
+
+#### `GET /api/user/submissions`
+
+Returns all paper submissions belonging to the authenticated user.
+
+**Response — `200 OK`:**
+
+```json
+[
+  {
+    "id": "uuid",
+    "title": "Assessment Innovations in West Africa",
+    "subTheme": "Digital Assessment Transformation",
+    "originalFileName": "my_paper.pdf",
+    "fileSizeMB": 2.45,
+    "status": "SUBMITTED",
+    "createdAt": "2026-09-29T10:00:00Z"
+  }
+]
+```
+
+---
+
+#### `POST /api/user/submissions`
+
+Uploads a new paper. This maps to the **Upload Paper** modal on the `/submission` page.
+
+**Request:** `multipart/form-data`
+
+| Field | Type | Required |
+|---|---|---|
+| `title` | string | Yes |
+| `subTheme` | string | No |
+| `file` | PDF file | Yes |
+
+**Validation:**
+- File must be PDF
+- Max file size: 20 MB (configurable)
+
+**Success response — `201 Created`:**
+
+```json
+{
+  "id": "uuid",
+  "title": "...",
+  "originalFileName": "paper.pdf",
+  "status": "SUBMITTED",
+  "createdAt": "..."
+}
+```
+
+---
+
+### 3.3 Admin Routes (Authenticated, Role: `ADMIN` only)
+
+All routes must reject non-admin tokens with `403 Forbidden`.
+
+#### `GET /api/admin/users`
+
+Returns a paginated list of all registered users. Displayed on the **Admin Dashboard** (`/admin`).
+
+**Query params:**
+
+| Param | Type | Default | Notes |
+|---|---|---|---|
+| `page` | int | 1 | — |
+| `limit` | int | 20 | — |
+| `search` | string | — | Fuzzy search by name or email |
+
+**Response — `200 OK`:**
+
+```json
+{
+  "users": [
+    {
+      "id": "uuid",
+      "fullName": "John Doe",
+      "email": "john@example.com",
+      "organization": "NECO",
+      "country": "Nigeria",
+      "phoneNumber": "+234...",
+      "role": "USER",
+      "paymentStatus": "PENDING",
+      "registrationPackage": "Registration Fee Only ($650)",
+      "createdAt": "2026-09-28T12:00:00Z"
+    }
+  ],
+  "total": 4052,
+  "page": 1,
+  "totalPages": 203
+}
+```
+
+---
+
+#### `PUT /api/admin/users/:userId`
+
+Updates any user's data or role. Used by the admin to modify records and **toggle payment status**.
+
+**Request body (partial update):**
+
+```json
+{
+  "paymentStatus": "COMPLETED"
+}
+```
+
+or to revert:
+
+```json
+{
+  "paymentStatus": "PENDING"
+}
+```
+
+**Response — `200 OK`:** Returns the updated user object.
+
+---
+
+#### `DELETE /api/admin/users/:userId`
+
+Deletes a user and all associated submissions.
+
+**Response — `204 No Content`**
+
+---
+
+#### `GET /api/admin/submissions`
+
+Returns all paper submissions across all users (for review purposes).
+
+**Query params:** `page`, `limit`, `status` (filter by submission status)
+
+**Response — `200 OK`:** Array of submission objects with nested user info.
+
+---
+
+#### `PUT /api/admin/submissions/:submissionId`
+
+Updates a submission's review status (e.g., `ACCEPTED`, `REJECTED`).
+
+**Request body:**
+
+```json
+{
+  "status": "ACCEPTED"
+}
+```
+
+---
+
+#### `GET /api/admin/stats`
+
+Returns aggregate statistics for the System Overview panel.
+
+**Response — `200 OK`:**
+
+```json
+{
+  "totalRegistrations": 4052,
+  "paymentsCompleted": 3180,
+  "totalSubmissions": 127,
+  "pendingPayments": 872
+}
+```
+
+---
+
+### 3.4 Contact / Email
+
+#### `POST /api/contact`
+
+Sends a message from the **Contact Us** form. This endpoint does **not** require authentication.
+
+**Request body:**
+
+```json
+{
+  "name": "Jane Smith",
+  "email": "jane@example.org",
+  "subject": "Enquiry about accommodation",
+  "message": "I would like to know..."
+}
+```
+
+**Backend behaviour:**
+1. Validate all fields are non-empty and `email` is valid.
+2. Save the record to the `ContactMessage` table.
+3. Send an email to **`aeaa2027@neco.gov.ng`** with the following template:
+
+```
+From: noreply@neco.gov.ng  (or the configured SMTP sender)
+To: aeaa2027@neco.gov.ng
+Reply-To: <sender's email>
+Subject: [AEAA Contact] <subject>
+
+New message from the AEAA Conference website:
+
+Name:    <name>
+Email:   <email>
+Subject: <subject>
+
+Message:
+<message>
+```
+
+4. Return success to the frontend.
+
+**Success Response — `200 OK`:**
+
+```json
+{
+  "message": "Your message has been sent successfully."
+}
+```
+
+**Error Response — `500`:** If the email fails to send, return an appropriate error. The record should still be saved to the database so it can be retried.
+
+---
+
+## 4. Email (SMTP) Configuration
+
+The backend must support sending emails through an SMTP server. Required environment variables:
+
+| Variable | Example | Notes |
+|---|---|---|
+| `SMTP_HOST` | `smtp.neco.gov.ng` | Institutional SMTP or relay |
+| `SMTP_PORT` | `587` | TLS usually on 587 |
+| `SMTP_USER` | `noreply@neco.gov.ng` | — |
+| `SMTP_PASS` | `<password>` | — |
+| `SMTP_FROM` | `noreply@neco.gov.ng` | The "From" address |
+| `CONTACT_EMAIL` | `aeaa2027@neco.gov.ng` | Recipient of contact form messages |
+
+---
+
+## 5. Authentication & Security Notes
+
+| Area | Requirement |
+|---|---|
+| **Password hashing** | Use bcrypt (cost ≥ 12) or argon2 |
+| **JWT secret** | Store in env var `JWT_SECRET`, minimum 256 bits |
+| **Token expiry** | Access token: 15 min–1 hr; Refresh token: 7 days |
+| **CORS** | Allow frontend origin (e.g. `https://aeaa2027.netlify.app`) |
+| **Rate limiting** | Apply to `/api/auth/login` (max 5 attempts/min) and `/api/contact` (max 3/min per IP) |
+| **File upload** | Validate MIME type is `application/pdf`, max 20 MB |
+| **Input sanitisation** | Sanitise all text inputs to prevent XSS/injection |
+
+---
+
+## 6. Environment Variables Summary
+
+```env
+# Database
+DATABASE_URL=postgresql://user:pass@localhost:5432/aeaa_db
+
+# JWT
+JWT_SECRET=your-256-bit-secret
+JWT_EXPIRY=1h
+
+# SMTP
+SMTP_HOST=smtp.neco.gov.ng
+SMTP_PORT=587
+SMTP_USER=noreply@neco.gov.ng
+SMTP_PASS=secret
+SMTP_FROM=noreply@neco.gov.ng
+CONTACT_EMAIL=aeaa2027@neco.gov.ng
+
+# File Storage
+UPLOAD_DIR=./uploads
+MAX_FILE_SIZE_MB=20
+
+# Server
+PORT=4000
+CORS_ORIGIN=https://aeaa2027.netlify.app
+```
+
+---
+
+## 7. Frontend ↔ Backend Integration Map
+
+This table shows exactly which frontend page/component calls which endpoint:
+
+| Frontend Page | Component / Action | Endpoint | Method |
+|---|---|---|---|
+| `/login` | Login form submit | `/api/auth/login` | POST |
+| `/registration` | Registration form submit | `/api/auth/register` | POST |
+| `/dashboard` | Load profile data | `/api/user/profile` | GET |
+| `/dashboard` | "Submit a Paper" link | `/api/user/submissions` | GET/POST |
+| `/submission` | Upload Paper modal | `/api/user/submissions` | POST |
+| `/admin` | Load all users table | `/api/admin/users` | GET |
+| `/admin` | Confirm/Revert Payment toggle | `/api/admin/users/:userId` | PUT |
+| `/admin` | Delete user button | `/api/admin/users/:userId` | DELETE |
+| `/admin` | System Overview stats | `/api/admin/stats` | GET |
+| `/contact` | Send Message form | `/api/contact` | POST |
+| Navbar | Logout button | Clear `localStorage` (client-side) | — |
+
+---
+
+## 8. Suggested Implementation Order
+
+1. **Database setup** — Create tables for [User](file:///g:/Projects/aeaa_FE/src/context/AuthContext.tsx#5-15), `PaperSubmission`, `ContactMessage`
+2. **Auth endpoints** — Register + Login with JWT
+3. **User profile** — GET/PUT profile
+4. **Contact endpoint** — POST with SMTP email delivery
+5. **Admin user management** — List, update payment, delete
+6. **Paper submissions** — Upload, list, admin review
+7. **Admin stats** — Aggregate query endpoint
+8. **Security hardening** — Rate limiting, input validation, CORS config
