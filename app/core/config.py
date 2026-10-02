@@ -6,7 +6,7 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "AEAA Conference Portal"
     
     # DB
-    DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql://postgres:ebimobowei81@localhost:5432/aeaa_db")
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql://thomas:ebimobowei81@localhost:5432/aeaa_db")
     
     # Security
     JWT_SECRET: str = os.getenv("JWT_SECRET", "your-256-bit-secret") # Should be overridden in prod
