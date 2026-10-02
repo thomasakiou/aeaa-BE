@@ -20,11 +20,14 @@ Message:
 """
     msg.set_content(body)
     
-    if not settings.SMTP_PASS or settings.SMTP_PASS == "":
-        print(f"Mock email sent to {settings.CONTACT_EMAIL}:\n{body}")
-        return
+    if settings.SMTP_PORT == 465:
+        server_connection = smtplib.SMTP_SSL(settings.SMTP_HOST, settings.SMTP_PORT)
+    else:
+        server_connection = smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT)
 
-    with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
-        server.starttls()
-        server.login(settings.SMTP_USER, settings.SMTP_PASS)
+    with server_connection as server:
+        if settings.SMTP_PORT != 465:
+            server.starttls()
+        if settings.SMTP_PASS:
+            server.login(settings.SMTP_USER, settings.SMTP_PASS)
         server.send_message(msg)

@@ -1,9 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
-from sqlalchemy import func, or_
+from pathlib import Path
 from typing import List, Optional
+from uuid import UUID
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import FileResponse
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import func, or_
 from app import models, schemas
 from app.api import deps
+from app.core.config import settings
 
 router = APIRouter()
 
@@ -78,13 +82,47 @@ def get_all_submissions(
     db: Session = Depends(deps.get_db),
     current_admin: models.User = Depends(deps.get_current_admin)
 ):
-    query = db.query(models.PaperSubmission)
+    query = db.query(models.PaperSubmission).options(
+        joinedload(models.PaperSubmission.user)
+    )
     
     if status_filter:
         query = query.filter(models.PaperSubmission.status == status_filter)
         
     submissions = query.offset((page - 1) * limit).limit(limit).all()
     return submissions
+
+@router.get("/submissions/{submission_id}/download")
+def download_submission(
+    submission_id: UUID,
+    db: Session = Depends(deps.get_db),
+    current_admin: models.User = Depends(deps.get_current_admin)
+):
+    submission = db.query(models.PaperSubmission).filter(
+        models.PaperSubmission.id == submission_id
+    ).first()
+    if not submission:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found")
+
+    upload_root = Path(settings.UPLOAD_DIR).resolve()
+    file_path = Path(submission.filePath).resolve()
+    try:
+        file_path.relative_to(upload_root)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Submission file not found")
+
+    if not file_path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Submission file not found")
+
+    filename = Path(submission.originalFileName.replace("\\", "/")).name
+    if not filename:
+        filename = f"{submission.id}.pdf"
+
+    return FileResponse(
+        path=file_path,
+        media_type="application/pdf",
+        filename=filename,
+    )
 
 from pydantic import BaseModel
 class AdminSubmissionUpdate(BaseModel):

@@ -64,12 +64,21 @@ class SubmissionBase(BaseModel):
     title: str
     subTheme: Optional[str] = None
 
+class SubmissionUserResponse(BaseModel):
+    id: UUID
+    fullName: str
+    email: EmailStr
+
+    class Config:
+        from_attributes = True
+
 class SubmissionResponse(SubmissionBase):
     id: UUID
     originalFileName: str
     fileSizeMB: Optional[float] = None
     status: SubmissionStatusEnum
     createdAt: datetime
+    user: SubmissionUserResponse
     
     class Config:
         from_attributes = True

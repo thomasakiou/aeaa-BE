@@ -28,7 +28,7 @@ def startup_event():
     # Ensure admin user exists
     db = SessionLocal()
     try:
-        admin_email = "aeaa2027@neco.gov.ng"
+        admin_email = "aeaa@neco.gov.ng"
         admin_user = db.query(User).filter(User.email == admin_email).first()
         if not admin_user:
             new_admin = User(

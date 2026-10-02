@@ -13,8 +13,8 @@ class Settings(BaseSettings):
     JWT_EXPIRY: int = int(os.getenv("JWT_EXPIRY", "60")) # minutes
     
     # SMTP
-    SMTP_HOST: str = os.getenv("SMTP_HOST", "smtp.neco.gov.ng")
-    SMTP_PORT: int = int(os.getenv("SMTP_PORT", "587"))
+    SMTP_HOST: str = os.getenv("SMTP_HOST", "mail.neco.gov.ng")
+    SMTP_PORT: int = int(os.getenv("SMTP_PORT", "465"))
     SMTP_USER: str = os.getenv("SMTP_USER", "noreply@neco.gov.ng")
     SMTP_PASS: str = os.getenv("SMTP_PASS", "")
     SMTP_FROM: str = os.getenv("SMTP_FROM", "noreply@neco.gov.ng")
@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     
     # Server
     PORT: int = int(os.getenv("PORT", "4000"))
-    CORS_ORIGIN: str = os.getenv("CORS_ORIGIN", "https://aeaa2027.netlify.app")
+    CORS_ORIGIN: str = os.getenv("CORS_ORIGIN", "https://aeaaafrica.netlify.app")
 
     class Config:
         env_file = ".env"
